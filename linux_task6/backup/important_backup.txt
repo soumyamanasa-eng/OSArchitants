@@ -1,0 +1,10 @@
+Line 1: Important information
+Line 2: Linux file management
+Line 3: Backup practice
+Line 4: File restoration
+Line 5: Operating systems
+Line 6: Permissions practice
+Line 7: Command line learning
+Line 8: System administration
+Line 9: Practical task
+Line 10: Task completed
