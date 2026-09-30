@@ -1,95 +1,239 @@
-#include<stdio.h>
-#include<stdlib.h>
-#include<unistd.h>
-#include<signal.h>
-#include<sys/wait.h>
-#include<time.h>
+#define _POSIX_C_SOURCE 200809L
 
-void alarm_handler(int sig)
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <sys/types.h>
+
+volatile sig_atomic_t sigterm_received = 0;
+volatile sig_atomic_t sigint_received = 0;
+volatile sig_atomic_t sigchld_received = 0;
+
+pid_t child_pid = -1;
+
+/* Signal handler */
+void signal_handler(int sig)
 {
-	printf("=====================================\n");
-	printf("           ALARAM! 🔔🔔\n");
-	printf("=====================================\n");
-	printf("        Your scheduled alarm is ON!\n");
-	printf("        Please check the time.\n");
-	printf("=====================================\n");
-	for (int i = 0; i < 5; i++)
-	{
-    	system("paplay alarm.wav");
-    	sleep(1);
-	}
-
-	   printf("\nAlarm finished.\n");
+    if (sig == SIGTERM)
+        sigterm_received = 1;
+    else if (sig == SIGINT)
+        sigint_received = 1;
+    else if (sig == SIGCHLD)
+        sigchld_received = 1;
 }
 
-int main()
+/* Play alarm sound */
+void play_alarm_sound(void)
 {
-	printf("==========================\n");
-	printf("      LINUX ALARM CLOCK    ");
-	printf("\n==========================\n");
-
-	int hour, minute;
-
-	printf("\nEnter alarm time (HH:MM): ");
-	scanf("%d:%d", &hour, &minute);
-	if (hour < 0 || hour > 23 || minute < 0 || minute > 59)
+    for (int i = 0; i < 3; i++)
     {
-        printf("Invalid time!\n");
+        pid_t sound_pid = fork();
+
+        if (sound_pid == 0)
+        {
+            execlp("paplay", "paplay", "alarm.wav", (char *)NULL);
+            perror("paplay");
+            _exit(1);
+        }
+        else if (sound_pid > 0)
+        {
+            waitpid(sound_pid, NULL, 0);
+        }
+        else
+        {
+            perror("fork");
+        }
+    }
+}
+
+/* Display alarm notification */
+void show_alert(const char *message)
+{
+    printf("\n");
+    printf("=============================================\n");
+    printf("          LINUX OS EVENT ALARM\n");
+    printf("=============================================\n");
+    printf("ALERT: %s\n", message);
+    printf("=============================================\n");
+}
+
+/* Get Y/N choice from user */
+char get_choice(void)
+{
+    char choice;
+
+    while (1)
+    {
+        printf("Enter choice [Y/N]: ");
+        fflush(stdout);
+
+        if (scanf(" %c", &choice) == 1)
+        {
+            while (getchar() != '\n')
+                ;
+
+            if (choice == 'Y' || choice == 'y' ||
+                choice == 'N' || choice == 'n')
+            {
+                return choice;
+            }
+        }
+
+        printf("Please enter Y or N.\n");
+    }
+}
+
+int main(void)
+{
+    struct sigaction sa;
+
+    sa.sa_handler = signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+
+    /* Register Linux signal handlers */
+    sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGCHLD, &sa, NULL);
+
+    printf("=============================================\n");
+    printf("       LINUX OS EVENT ALARM SYSTEM\n");
+    printf("=============================================\n\n");
+
+    printf("Main Monitor PID : %d\n", getpid());
+
+    /* Create child process */
+    child_pid = fork();
+
+    if (child_pid < 0)
+    {
+        perror("fork");
         return 1;
     }
 
-    time_t now = time(NULL);
-    struct tm target = *localtime(&now);
-
-    target.tm_hour = hour;
-    target.tm_min = minute;
-    target.tm_sec = 0;
-
-    time_t target_time = mktime(&target);
-
-    if (target_time <= now)
+    if (child_pid == 0)
     {
-        target.tm_mday++;
-        target_time = mktime(&target);
+        printf("Child Process PID : %d\n", getpid());
+        printf("Child will finish automatically after 05 seconds.\n");
+        printf("\nMonitoring OS events...\n");
+        fflush(stdout);
+
+        sleep(5);
+
+        printf("\nChild process is terminating normally.\n");
+        _exit(0);
     }
 
-    int seconds = (int)difftime(target_time, now);
+    printf("Child PID         : %d\n", child_pid);
+    printf("\n");
+    printf("Events being monitored:\n");
+    printf("1. SIGTERM - Termination request\n");
+    printf("2. SIGINT  - Keyboard interrupt (Ctrl+C)\n");
+    printf("3. SIGCHLD - Child process termination\n");
+    printf("\n");
+    printf("System is ready.\n");
+    printf("=============================================\n");
 
-    printf("\nAlarm set for %02d:%02d\n", hour, minute);
-    printf("Waiting for %d seconds...\n", seconds);
-
-    pid_t pid = fork();
-
-    if (pid < 0)
+    while (1)
     {
-        printf("Failed to create process.\n");
-        return 1;
-    }
+        /* EVENT 1: SIGTERM */
+        if (sigterm_received)
+        {
+            sigterm_received = 0;
 
-    if (pid == 0)
-    {
-        printf("\n[Child Process]\n");
-        printf("Alarm process started.\n");
-        printf("Child PID: %d\n", getpid());
+            show_alert("Termination request (SIGTERM) received.");
 
-        signal(SIGALRM, alarm_handler);
+            char choice = get_choice();
 
-        alarm(seconds);
+            if (choice == 'Y' || choice == 'y')
+            {
+                printf("\nTermination accepted.\n");
+                printf("The alarm system will now terminate.\n");
 
-        pause();
+                if (child_pid > 0)
+                {
+                    kill(child_pid, SIGTERM);
+                    waitpid(child_pid, NULL, 0);
+                }
 
-        return 0;
-    }
-    else
-    {
-        printf("\n[Parent Process]\n");
-        printf("Parent PID: %d\n", getpid());
-        printf("Child PID: %d\n", pid);
-        printf("Parent is waiting for the alarm process...\n");
+                printf("Process terminated successfully.\n");
+                return 0;
+            }
+            else
+            {
+                printf("\nTermination rejected.\n");
+                printf("The alarm system will continue running.\n");
+                printf("Playing alarm sound...\n");
 
-        waitpid(pid, NULL, 0);
+                play_alarm_sound();
 
-        printf("\nParent: Alarm process finished.\n");
+                printf("Monitoring continues.\n");
+            }
+        }
+
+        /* EVENT 2: SIGINT */
+        if (sigint_received)
+        {
+            sigint_received = 0;
+
+            show_alert("Keyboard interrupt (SIGINT / Ctrl+C) received.");
+
+            char choice = get_choice();
+
+            if (choice == 'Y' || choice == 'y')
+            {
+                printf("\nExit request accepted.\n");
+                printf("Shutting down alarm system...\n");
+
+                if (child_pid > 0)
+                {
+                    kill(child_pid, SIGTERM);
+                    waitpid(child_pid, NULL, 0);
+                }
+
+                printf("Process terminated successfully.\n");
+                return 0;
+            }
+            else
+            {
+                printf("\nExit request rejected.\n");
+                printf("The alarm system will continue running.\n");
+                printf("Playing alarm sound...\n");
+
+                play_alarm_sound();
+
+                printf("Monitoring continues.\n");
+            }
+        }
+
+        /* EVENT 3: SIGCHLD */
+        if (sigchld_received)
+        {
+            int status;
+            pid_t result;
+
+            sigchld_received = 0;
+
+            result = waitpid(child_pid, &status, WNOHANG);
+
+            if (child_pid > 0 && result == child_pid)
+            {
+                show_alert("Child process has terminated (SIGCHLD received).");
+
+                printf("Child PID %d has ended.\n", child_pid);
+                printf("Playing alarm sound...\n");
+
+                play_alarm_sound();
+
+                printf("Parent monitor is still running.\n");
+
+                child_pid = -1;
+            }
+        }
+
+        sleep(1);
     }
 
     return 0;
